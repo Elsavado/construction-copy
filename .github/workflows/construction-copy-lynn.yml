@@ -41,7 +41,7 @@ jobs:
       - name: Choose files to copy (skip duplicates)
         run: |
           mkdir -p plan
-          python3 scripts/lynn_dedupe.py shintiru_list.json plan list_A.json list_B.json list_C.json list_D.json list_H.json list_I.json
+          python3 scripts/lynn_dedupe.py shintiru_list.json plan A=list_A.json B=list_B.json C=list_C.json D=list_D.json H=list_H.json I=list_I.json
           cat plan/summary.json
 
       - name: Copy the chosen files into "Lynn links"

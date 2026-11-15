@@ -1,0 +1,65 @@
+name: construction-copy-lynn
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone from the secret
+        env:
+          SECTION: ${{ secrets.SHINTIRU_RCLONE_CONF }}
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$SECTION" > ~/.config/rclone/rclone.conf
+          body=$(awk '/^\[shintiru\]/{f=1;next} /^\[/{f=0} f' ~/.config/rclone/rclone.conf)
+          {
+            for pair in A:1gyBeBgodLqDLNm5Z2b_vQN1gR_7dRqpZ B:1qk5MXFsv1FGkuM9_koFMzsLQCNM3bR4P C:13QyUlC29wtyIJ9Jnc1AJmhq9q8fJ3FZf D:12VeTI0uV93hfBQ0gwhplOBzPc5z9seHM H:1w1bTWUCfPu3OUxuCQ8tdReQklBMWHiLL I:18ymd0sQ1stmjps5VhfIEoQLVngSQOgvY; do
+              label=${pair%%:*}; id=${pair#*:}
+              echo "[src$label]"; echo "$body"; echo "root_folder_id = $id"; echo
+            done
+          } >> ~/.config/rclone/rclone.conf
+
+      - name: List every link and the destination with checksums
+        run: |
+          for label in A B C D H I; do
+            rclone lsjson -R --files-only --hash "src$label:" > "list_$label.json"
+            echo "$label listed: $(python3 -c "import json; print(len(json.load(open('list_$label.json'))))")"
+          done
+          rclone lsjson -R --files-only --hash "shintiru:" > shintiru_list.json
+          echo "shintiru listed"
+
+      - name: Choose files to copy (skip duplicates)
+        run: |
+          mkdir -p plan
+          python3 scripts/lynn_dedupe.py shintiru_list.json plan list_A.json list_B.json list_C.json list_D.json list_H.json list_I.json
+          cat plan/summary.json
+
+      - name: Copy the chosen files into "Lynn links"
+        run: |
+          for label in A B C D H I; do
+            if [ -s "plan/files_from_$label.txt" ]; then
+              rclone copy "src$label:" "shintiru:Lynn links/$label" --files-from "plan/files_from_$label.txt" --drive-chunk-size 64M -q
+            fi
+          done
+
+      - name: Verify the copies
+        run: |
+          for label in A B C D H I; do
+            if [ -s "plan/files_from_$label.txt" ]; then
+              rclone check "src$label:" "shintiru:Lynn links/$label" --files-from "plan/files_from_$label.txt" --one-way
+            fi
+          done
+
+      - name: Upload the summary to the Drive
+        run: |
+          rclone copyto plan/summary.json "shintiru:Lynn links/summary.json"

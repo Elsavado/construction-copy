@@ -1,0 +1,82 @@
+name: construction-copy-filings
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  filings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone from the secrets
+        env:
+          SECTION: ${{ secrets.SHINTIRU_RCLONE_CONF }}
+          SOURCES: ${{ secrets.LAW_SOURCE_IDS }}
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$SECTION" > ~/.config/rclone/rclone.conf
+          awk '/^\[shintiru\]/{f=1;next} /^\[/{f=0} f' ~/.config/rclone/rclone.conf > shintiru_body.txt
+          printf '%s' "$SOURCES" > sources.json
+          python3 - <<'PY'
+          import json
+          ids = json.load(open('sources.json'))
+          body = open('shintiru_body.txt').read()
+          with open('/home/runner/.config/rclone/rclone.conf', 'a') as fh:
+              for n, sid in enumerate(ids, 1):
+                  fh.write(f'\n[src{n:02d}]\n{body}')
+                  fh.write(f'root_folder_id = {sid}\n')
+          print('configured sources:', len(ids))
+          PY
+
+      - name: List every source and the shintiru library with checksums
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          ids = json.load(open('sources.json'))
+          for n in range(1, len(ids) + 1):
+              out = subprocess.run(['rclone', 'lsjson', '-R', '--files-only', '--hash', f'src{n:02d}:'],
+                                   capture_output=True, text=True)
+              open(f'list_{n:02d}.json', 'w').write(out.stdout or '[]')
+              print(f'src{n:02d} exit {out.returncode}')
+          out = subprocess.run(['rclone', 'lsjson', '-R', '--files-only', '--hash', 'shintiru:'],
+                               capture_output=True, text=True)
+          open('shintiru_list.json', 'w').write(out.stdout or '[]')
+          print('shintiru exit', out.returncode)
+          PY
+
+      - name: Select the court filings
+        env:
+          MODE: filings
+        run: |
+          mkdir -p plan_filings
+          args=""
+          for f in list_*.json; do n=${f#list_}; n=${n%.json}; args="$args src$n=$f"; done
+          python3 scripts/law_select.py shintiru_list.json plan_filings $args
+
+      - name: Copy into LAW/filings
+        run: |
+          for f in plan_filings/files_from_*.txt; do
+            n=$(basename "$f" .txt); n=${n#files_from_}
+            if [ -s "$f" ]; then
+              rclone copy "$n:" "shintiru:LAW/filings/source-${n#src}" --files-from "$f" --drive-chunk-size 64M -q
+            fi
+          done
+
+      - name: Verify the copies
+        run: |
+          for f in plan_filings/files_from_*.txt; do
+            n=$(basename "$f" .txt); n=${n#files_from_}
+            if [ -s "$f" ]; then
+              rclone check "$n:" "shintiru:LAW/filings/source-${n#src}" --files-from "$f" --one-way
+            fi
+          done
+
+      - name: Upload the summary to LAW/filings
+        run: rclone copyto plan_filings/summary.json "shintiru:LAW/filings/summary.json"

@@ -19,6 +19,7 @@ FILING = re.compile(r"plaint|petition|affidavit|interrogat|summons|notice of mot
                     r"application|pleading|complaint|injunction|written statement|defen[cs]e|"
                     r"answer to|attachment before", re.I)
 
+MODE = os.environ.get("MODE", "law")  # "law" = non-filing law material; "filings" = only the filings
 shintiru = json.load(open(sys.argv[1], encoding="utf-8"))
 out_dir = sys.argv[2]
 pairs = [a.split("=", 1) for a in sys.argv[3:]]
@@ -38,7 +39,10 @@ for label, path in pairs:
         if not LAW.search(name):
             continue
         if FILING.search(name):
-            st["left_out_court_filings"] += 1
+            if MODE != "filings":
+                st["left_out_court_filings"] += 1
+                continue
+        elif MODE == "filings":
             continue
         st["law_related"] += 1
         md5 = (it.get("Hashes") or {}).get("md5")

@@ -63,7 +63,7 @@ jobs:
           for f in plan/files_from_*.txt; do
             n=$(basename "$f" .txt); n=${n#files_from_}
             if [ -s "$f" ]; then
-              rclone copy "src$n:" "shintiru:LAW/source-$n" --files-from "$f" --drive-chunk-size 64M -q
+              rclone copy "$n:" "shintiru:LAW/source-${n#src}" --files-from "$f" --drive-chunk-size 64M -q
             fi
           done
 
@@ -72,7 +72,7 @@ jobs:
           for f in plan/files_from_*.txt; do
             n=$(basename "$f" .txt); n=${n#files_from_}
             if [ -s "$f" ]; then
-              rclone check "src$n:" "shintiru:LAW/source-$n" --files-from "$f" --one-way
+              rclone check "$n:" "shintiru:LAW/source-${n#src}" --files-from "$f" --one-way
             fi
           done
 

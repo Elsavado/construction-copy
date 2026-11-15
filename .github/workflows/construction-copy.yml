@@ -1,0 +1,67 @@
+name: construction-copy
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rclone, Python libraries and LibreOffice
+        run: |
+          curl -fsSL https://rclone.org/install.sh | sudo bash
+          python3 -m pip install --user --break-system-packages pypdf python-pptx
+          sudo apt-get update -q
+          sudo apt-get install -y -q libreoffice-impress >/dev/null
+
+      - name: Configure rclone from the secret
+        env:
+          SECTION: ${{ secrets.SHINTIRU_RCLONE_CONF }}
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$SECTION" > ~/.config/rclone/rclone.conf
+          body=$(awk '/^\[shintiru\]/{f=1;next} /^\[/{f=0} f' ~/.config/rclone/rclone.conf)
+          {
+            echo "[srcA]"; echo "$body"; echo "root_folder_id = 191uATjuI4ZJ1bYavYoi0L5OMOsZiNnCu"; echo
+            echo "[srcB]"; echo "$body"; echo "root_folder_id = 1ifPJJZylnmYWuybMr1_H2zGLyNeSpQrH"; echo
+          } >> ~/.config/rclone/rclone.conf
+          rclone listremotes
+
+      - name: List both source folders
+        run: |
+          rclone lsjson -R --files-only srcA: > lsjson_A.json
+          rclone lsjson -R --files-only srcB: > lsjson_B.json
+          python3 -c "import json; [print(f, len(json.load(open(f)))) for f in ['lsjson_A.json', 'lsjson_B.json']]"
+
+      - name: Copy both folders into "Construction and management"
+        run: |
+          rclone copy srcA: "shintiru:Construction and management/2130 Construction Technology 1" --drive-chunk-size 64M -q
+          rclone copy srcB: "shintiru:Construction and management/Y1S2" --drive-chunk-size 64M -q
+
+      - name: Verify the copy on the destination
+        run: |
+          rclone check srcA: "shintiru:Construction and management/2130 Construction Technology 1" --one-way
+          rclone check srcB: "shintiru:Construction and management/Y1S2" --one-way
+
+      - name: Stage files locally and convert old .ppt to .pptx
+        run: |
+          mkdir -p stage/A stage/B
+          rclone copy srcA: stage/A -q
+          rclone copy srcB: stage/B -q
+          find stage -name "*.ppt" | while read -r f; do soffice --headless --convert-to pptx --outdir "$(dirname "$f")" "$f" >/dev/null 2>&1 || true; done
+          echo "pptx files staged: $(find stage -name '*.pptx' | wc -l)"
+
+      - name: Build the combined manifest
+        run: |
+          mkdir -p manifest
+          python3 scripts/manifest.py lsjson_A.json lsjson_B.json stage manifest
+
+      - name: Upload manifest to the Drive destination
+        run: |
+          rclone copyto manifest/MANIFEST.csv "shintiru:Construction and management/MANIFEST.csv"
+          rclone copyto manifest/MANIFEST.md "shintiru:Construction and management/MANIFEST.md"

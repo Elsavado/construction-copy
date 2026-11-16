@@ -1,0 +1,38 @@
+name: open-datasets
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rclone
+        run: curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone from the secret
+        env:
+          SECTION: ${{ secrets.SHINTIRU_RCLONE_CONF }}
+        run: |
+          mkdir -p ~/.config/rclone
+          printf '%s\n' "$SECTION" > ~/.config/rclone/rclone.conf
+
+      - name: Download licensed datasets from Zenodo and verify checksums
+        run: |
+          python3 scripts/zenodo_fetch.py 15622584 stage/MBDD2025
+          python3 scripts/zenodo_fetch.py 19103585 stage/SiteScribe-paper
+
+      - name: Copy to the shintiru Drive
+        run: |
+          rclone copy stage/MBDD2025 "shintiru:Open datasets/Building defect detection (MBDD2025)" -q
+          rclone copy stage/SiteScribe-paper "shintiru:Open datasets/Change order platform paper (SiteScribe)" -q
+
+      - name: Verify the copies
+        run: |
+          rclone check stage/MBDD2025 "shintiru:Open datasets/Building defect detection (MBDD2025)" --one-way
+          rclone check stage/SiteScribe-paper "shintiru:Open datasets/Change order platform paper (SiteScribe)" --one-way
